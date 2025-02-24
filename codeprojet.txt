@@ -1,0 +1,172 @@
+📌 1. Installation et importation des bibliothèques
+python
+Copier
+Modifier
+# 📦 Installation des bibliothèques nécessaires
+!pip install prophet pmdarima
+
+# 📚 Importation des bibliothèques
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.arima.model import ARIMA
+from pmdarima import auto_arima
+from prophet import Prophet
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+📌 2. Chargement et exploration des données
+python
+Copier
+Modifier
+# 📂 Chargement des fichiers (les fichiers doivent être préalablement importés dans Google Colab)
+train = pd.read_csv("train.csv", parse_dates=["date"])
+holidays = pd.read_csv("holidays_events.csv", parse_dates=["date"])
+
+# 📊 Aperçu des données
+print(train.head())
+print(holidays.head())
+
+# Vérification des valeurs manquantes
+print(train.isnull().sum())
+
+# Agrégation des ventes par jour
+sales_per_day = train.groupby("date")["sales"].sum()
+
+# 📈 Visualisation de la série temporelle
+plt.figure(figsize=(12,6))
+plt.plot(sales_per_day, color='blue')
+plt.title("Evolution des ventes dans le temps")
+plt.xlabel("Date")
+plt.ylabel("Ventes")
+plt.show()
+📌 3. Décomposition de la série temporelle
+python
+Copier
+Modifier
+# 📊 Décomposition de la série temporelle
+decomposition = seasonal_decompose(sales_per_day, model='additive', period=365)
+
+# 🔹 Affichage des composantes
+plt.figure(figsize=(12,8))
+decomposition.plot()
+plt.show()
+📌 4. Test de stationnarité (ADF)
+python
+Copier
+Modifier
+# 📈 Test de stationnarité ADF
+adf_test = adfuller(sales_per_day)
+print(f"ADF Statistic: {adf_test[0]:.4f}")
+print(f"p-value: {adf_test[1]:.4f}")
+
+if adf_test[1] > 0.05:
+    print("⚠️ La série n'est PAS stationnaire. Une différenciation est nécessaire.")
+else:
+    print("✅ La série est stationnaire.")
+📌 5. Différenciation pour rendre la série stationnaire
+python
+Copier
+Modifier
+# 📉 Différenciation de la série (d=1)
+sales_diff = sales_per_day.diff().dropna()
+
+# 📊 Visualisation après différenciation
+plt.figure(figsize=(12,6))
+plt.plot(sales_diff, color='red')
+plt.title("Série après différenciation (d=1)")
+plt.xlabel("Date")
+plt.ylabel("Ventes différenciées")
+plt.show()
+📌 6. Sélection des paramètres optimaux (p,d,q) avec ACF/PACF
+python
+Copier
+Modifier
+# 📊 Tracés ACF et PACF
+fig, ax = plt.subplots(1, 2, figsize=(12,4))
+
+plot_acf(sales_diff, ax=ax[0])
+ax[0].set_title("Autocorrelation (ACF)")
+
+plot_pacf(sales_diff, ax=ax[1])
+ax[1].set_title("Autocorrelation Partielle (PACF)")
+
+plt.show()
+📌 7. Sélection automatique des paramètres ARIMA avec Auto-ARIMA
+python
+Copier
+Modifier
+# 📌 Recherche automatique des paramètres optimaux
+auto_arima_model = auto_arima(sales_per_day, seasonal=False, trace=True, stepwise=True)
+
+# Affichage des meilleurs paramètres
+print(f"Meilleurs paramètres trouvés : {auto_arima_model.order}")
+📌 8. Modélisation ARIMA et prévisions
+python
+Copier
+Modifier
+# 📈 Modèle ARIMA avec les meilleurs paramètres trouvés
+p, d, q = auto_arima_model.order
+model_arima = ARIMA(sales_per_day, order=(p, d, q))
+model_arima_fit = model_arima.fit()
+
+# 🔮 Génération des prévisions
+forecast_arima = model_arima_fit.forecast(steps=90)
+
+# 📊 Visualisation des prévisions ARIMA
+plt.figure(figsize=(12,6))
+plt.plot(sales_per_day, label="Ventes réelles", color="blue")
+plt.plot(pd.date_range(start=sales_per_day.index[-1], periods=90, freq='D'), forecast_arima, label="Prévisions ARIMA", color="red", linestyle="dashed")
+plt.legend()
+plt.title("Prévisions ARIMA")
+plt.show()
+📌 9. Modélisation avec Prophet
+python
+Copier
+Modifier
+# 📊 Préparation des données pour Prophet
+train_grouped = train.groupby("date")["sales"].sum().reset_index()
+train_grouped.columns = ["ds", "y"]
+
+# 📆 Préparation des jours fériés
+holidays = holidays[holidays["locale"] == "National"][["date", "description"]]
+holidays.columns = ["ds", "holiday"]
+
+# 📈 Modèle Prophet
+model_prophet = Prophet(holidays=holidays, yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
+model_prophet.fit(train_grouped)
+
+# 🔮 Prévisions Prophet
+future = model_prophet.make_future_dataframe(periods=90)
+forecast_prophet = model_prophet.predict(future)
+
+# 📊 Visualisation des prévisions Prophet
+plt.figure(figsize=(12,6))
+plt.plot(train_grouped["ds"], train_grouped["y"], label="Données réelles", color="blue")
+plt.plot(forecast_prophet["ds"], forecast_prophet["yhat"], label="Prévisions Prophet", color="red", linestyle="dashed")
+plt.legend()
+plt.title("Comparaison des prévisions Prophet vs Données réelles")
+plt.show()
+📌 10. Évaluation des modèles
+python
+Copier
+Modifier
+# 📊 Sélection de la période de test
+test = train_grouped.iloc[-90:]
+preds_arima = forecast_arima.values
+preds_prophet = forecast_prophet.iloc[-90:]["yhat"].values
+
+# 📌 Calcul des erreurs
+mae_arima = mean_absolute_error(test["y"], preds_arima)
+rmse_arima = np.sqrt(mean_squared_error(test["y"], preds_arima))
+mape_arima = np.mean(np.abs((test["y"] - preds_arima) / test["y"])) * 100
+
+mae_prophet = mean_absolute_error(test["y"], preds_prophet)
+rmse_prophet = np.sqrt(mean_squared_error(test["y"], preds_prophet))
+mape_prophet = np.mean(np.abs((test["y"] - preds_prophet) / test["y"])) * 100
+
+print(f"📌 ARIMA - MAE: {mae_arima:.2f}, RMSE: {rmse_arima:.2f}, MAPE: {mape_arima:.2f}%")
+print(f"📌 Prophet - MAE: {mae_prophet:.2f}, RMSE: {rmse_prophet:.2f}, MAPE: {mape_prophet:.2f}%")
+✅ Ce code couvre l’ensemble du projet : exploration, préparation, modélisation et évaluation des prévisions avec ARIMA et Prophet.
